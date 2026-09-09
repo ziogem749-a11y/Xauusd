@@ -1,7 +1,8 @@
 """
-Loop utama bot - strategi EMA Crossover (9/21), RR 1:1.5.
+Loop utama bot - strategi Random Signal, RR 1:1.5.
 Otomatis cetak ringkasan win rate tiap kali posisi baru saja closed.
 Otomatis WARNING kalau data candle dari TickerAll ternyata beku/stuck.
+Tetap print log walau lagi nunggu posisi terbuka ketutup.
 """
 import os
 import time
@@ -15,7 +16,7 @@ from config import (
 from data_feed import get_candles
 from strategy import check_signal
 from risk_manager import calculate_lot_size, daily_loss_exceeded
-from executor import place_order, has_open_position, get_account_info
+from executor import place_order, has_open_position, get_account_info, get_open_positions_detail
 from stats import print_win_rate_summary
 
 PAUSE_TRADING = os.environ.get("PAUSE_TRADING", "false").lower() == "true"
@@ -41,11 +42,12 @@ def main():
     last_seen_candle_time = None
     stuck_count = 0
 
-    print(f"Bot mulai jalan (strategi: EMA Crossover, {TIMEFRAME}). Memantau XAUUSD...")
+    print(f"Bot mulai jalan (strategi: Random Signal, {TIMEFRAME}). Memantau XAUUSD...")
     if PAUSE_TRADING:
         print("⏸️  PAUSE_TRADING AKTIF - bot HANYA memantau & print data, TIDAK akan kirim order.")
     if was_position_open:
-        print("Catatan: sudah ada posisi terbuka saat bot start.")
+        positions = get_open_positions_detail(client, account_id)
+        print(f"Catatan: sudah ada posisi terbuka saat bot start. Detail: {positions}")
 
     while True:
         try:
@@ -73,6 +75,8 @@ def main():
             was_position_open = is_position_open_now
 
             if is_position_open_now:
+                positions = get_open_positions_detail(client, account_id)
+                print(f"[{datetime.datetime.now()}] Masih ada posisi terbuka, menunggu ketutup. Detail: {positions}")
                 time.sleep(CHECK_INTERVAL_SECONDS)
                 continue
 
