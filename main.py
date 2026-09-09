@@ -1,11 +1,7 @@
 """
-Loop utama bot - strategi RSI Reversal, sinyal lebih sering, RR ketat 1:1.5.
-RSI dihitung termasuk candle "hidup" (harga live) supaya sedekat mungkin
-dengan yang ditampilkan real-time di MT5.
+Loop utama bot - strategi EMA Crossover (9/21), RR 1:1.5.
 Otomatis cetak ringkasan win rate tiap kali posisi baru saja closed.
-
-PAUSE_TRADING=true di Railway Variables -> bot tetap jalan mantau & print data,
-TAPI TIDAK kirim order sama sekali.
+Otomatis WARNING kalau data candle dari TickerAll ternyata beku/stuck.
 """
 import os
 import time
@@ -16,14 +12,14 @@ from config import (
     TICKERALL_API_KEY, BROKER, MT_SERVER, MT_ACCOUNT, MT_PASSWORD,
     CHECK_INTERVAL_SECONDS, TIMEFRAME,
 )
-from data_feed import get_candles, append_live_candle
+from data_feed import get_candles
 from strategy import check_signal
 from risk_manager import calculate_lot_size, daily_loss_exceeded
 from executor import place_order, has_open_position, get_account_info
 from stats import print_win_rate_summary
-from price_check import get_live_price, is_price_reliable
 
 PAUSE_TRADING = os.environ.get("PAUSE_TRADING", "false").lower() == "true"
+STUCK_DATA_THRESHOLD = 3
 
 
 def main():
@@ -42,7 +38,10 @@ def main():
 
     was_position_open = has_open_position(client, account_id)
 
-    print(f"Bot mulai jalan (strategi: RSI Reversal {TIMEFRAME}). Memantau XAUUSD...")
+    last_seen_candle_time = None
+    stuck_count = 0
+
+    print(f"Bot mulai jalan (strategi: EMA Crossover, {TIMEFRAME}). Memantau XAUUSD...")
     if PAUSE_TRADING:
         print("⏸️  PAUSE_TRADING AKTIF - bot HANYA memantau & print data, TIDAK akan kirim order.")
     if was_position_open:
@@ -77,19 +76,29 @@ def main():
                 time.sleep(CHECK_INTERVAL_SECONDS)
                 continue
 
-            df_closed = get_candles(client, account_id, limit=300)
-            if df_closed.empty:
+            df = get_candles(client, account_id, limit=300)
+            if df.empty:
                 print("Data candle kosong, skip cek kali ini.")
                 time.sleep(CHECK_INTERVAL_SECONDS)
                 continue
 
-            live_price = get_live_price(client, account_id)
-            df = append_live_candle(df_closed, live_price)
-
-            result = check_signal(df)
-
             last_candle_time = df["time"].iloc[-1]
             last_close = df["close"].iloc[-1]
+
+            if last_candle_time == last_seen_candle_time:
+                stuck_count += 1
+            else:
+                stuck_count = 0
+            last_seen_candle_time = last_candle_time
+
+            if stuck_count >= STUCK_DATA_THRESHOLD:
+                print(f"⚠️⚠️⚠️ DATA BEKU TERDETEKSI! Candle terakhir tidak berubah selama "
+                      f"{stuck_count + 1}x cek berturut-turut (terakhir={last_candle_time}). "
+                      f"Order TIDAK akan dikirim sampai data normal lagi.")
+                time.sleep(CHECK_INTERVAL_SECONDS)
+                continue
+
+            result = check_signal(df)
 
             if result["signal"] in ("BUY", "SELL"):
                 lot = calculate_lot_size(equity_now, result["entry"], result["sl"])
@@ -98,15 +107,13 @@ def main():
 
                 if PAUSE_TRADING:
                     print("⏸️  PAUSE_TRADING aktif - order TIDAK dikirim (mode observasi saja).")
-                elif not is_price_reliable(result["entry"], live_price):
-                    print("Order dibatalkan karena data harga dicurigai tidak akurat.")
                 else:
                     order = place_order(client, account_id, result["signal"], lot, result["sl"], result["tp"])
                     if order is not None:
                         was_position_open = True
             else:
                 print(f"[{datetime.datetime.now()}] Belum ada sinyal ({result.get('reason', '')}). "
-                      f"[live_price={live_price}, candle_terakhir={last_candle_time}, close={last_close:.2f}]")
+                      f"[candle_terakhir={last_candle_time}, close={last_close:.2f}]")
 
         except Exception as e:
             print(f"Error di loop utama: {e}")
