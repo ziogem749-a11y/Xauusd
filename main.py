@@ -1,5 +1,6 @@
 """
 Loop utama bot - strategi RSI Reversal (M5), sinyal lebih sering, RR ketat 1:1.5.
+Otomatis cetak ringkasan win rate tiap kali posisi baru saja closed.
 """
 import time
 import datetime
@@ -13,6 +14,7 @@ from data_feed import get_candles
 from strategy import check_signal
 from risk_manager import calculate_lot_size, daily_loss_exceeded
 from executor import place_order, has_open_position, get_account_info
+from stats import print_win_rate_summary
 
 
 def main():
@@ -29,7 +31,11 @@ def main():
     equity_start_of_day = account_info["equity"]
     current_day = datetime.date.today()
 
+    was_position_open = has_open_position(client, account_id)
+
     print("Bot mulai jalan (strategi: RSI Reversal M5). Memantau XAUUSD...")
+    if was_position_open:
+        print("Catatan: sudah ada posisi terbuka saat bot start.")
 
     while True:
         try:
@@ -48,7 +54,15 @@ def main():
                 time.sleep(CHECK_INTERVAL_SECONDS)
                 continue
 
-            if has_open_position(client, account_id):
+            is_position_open_now = has_open_position(client, account_id)
+
+            if was_position_open and not is_position_open_now:
+                print("Posisi baru saja closed. Menghitung ringkasan win rate terbaru...")
+                print_win_rate_summary(client, account_id)
+
+            was_position_open = is_position_open_now
+
+            if is_position_open_now:
                 time.sleep(CHECK_INTERVAL_SECONDS)
                 continue
 
@@ -64,7 +78,9 @@ def main():
                 lot = calculate_lot_size(equity_now, result["entry"], result["sl"])
                 print(f"Sinyal {result['signal']} | entry={result['entry']:.2f} sl={result['sl']:.2f} "
                       f"tp={result['tp']:.2f} lot={lot} | {result['reason']}")
-                place_order(client, account_id, result["signal"], lot, result["sl"], result["tp"])
+                order = place_order(client, account_id, result["signal"], lot, result["sl"], result["tp"])
+                if order is not None:
+                    was_position_open = True
             else:
                 print(f"[{datetime.datetime.now()}] Belum ada sinyal ({result.get('reason', '')}).")
 
