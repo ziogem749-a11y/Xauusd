@@ -7,10 +7,10 @@ from tickerall import Tickerall
 
 from config import (
     TICKERALL_API_KEY, BROKER, MT_SERVER, MT_ACCOUNT, MT_PASSWORD,
-    CHECK_INTERVAL_SECONDS,
+    CHECK_INTERVAL_SECONDS, TEST_MODE,
 )
 from data_feed import get_htf_candles, get_ltf_candles
-from strategy import check_signal
+from strategy import check_signal, check_signal_test_mode
 from risk_manager import calculate_lot_size, daily_loss_exceeded
 from executor import place_order, has_open_position, get_account_info
 
@@ -28,6 +28,9 @@ def main():
     account_info = get_account_info(client, account_id)
     equity_start_of_day = account_info["equity"]
     current_day = datetime.date.today()
+
+    if TEST_MODE:
+        print("⚠️  TEST_MODE AKTIF - bot akan paksa BUY di kesempatan pertama, cuma buat tes pipeline!")
 
     print("Bot mulai jalan (strategi: Trend Pullback Entry). Memantau XAUUSD...")
 
@@ -60,7 +63,7 @@ def main():
                 time.sleep(CHECK_INTERVAL_SECONDS)
                 continue
 
-            result = check_signal(df_h1, df_m15)
+            result = check_signal_test_mode(df_h1, df_m15) if TEST_MODE else check_signal(df_h1, df_m15)
 
             if result["signal"] in ("BUY", "SELL"):
                 lot = calculate_lot_size(equity_now, result["entry"], result["sl"])
