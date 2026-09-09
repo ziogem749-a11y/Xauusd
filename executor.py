@@ -29,9 +29,13 @@ def place_order(client, account_id: str, signal: str, lot: float, sl: float, tp:
     return None
 
 
-def has_open_position(client, account_id: str) -> bool:
+def get_open_positions_detail(client, account_id: str):
     detail = client.accounts.get(account_id)
-    positions = detail.positions or []
+    return detail.positions or []
+
+
+def has_open_position(client, account_id: str) -> bool:
+    positions = get_open_positions_detail(client, account_id)
     return any(getattr(p, "symbol", None) == SYMBOL for p in positions)
 
 
