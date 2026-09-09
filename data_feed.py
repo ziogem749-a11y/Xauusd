@@ -27,9 +27,10 @@ def get_candles(client, account_id: str, limit: int = 300) -> pd.DataFrame:
         if not _printed_symbols_debug:
             try:
                 symbols = client.accounts.symbols(account_id)
-                gold_like = [s for s in symbols if "XAU" in str(s).upper() or "GOLD" in str(s).upper()]
                 print(f"DEBUG: symbol '{SYMBOL}' gak ketemu/kosong datanya.")
-                print(f"DEBUG: symbol yang mengandung XAU/GOLD di akun ini: {gold_like}")
+                print(f"DEBUG: tipe data symbols = {type(symbols)}")
+                print(f"DEBUG: total symbols = {len(symbols) if symbols else 0}")
+                print(f"DEBUG: 30 symbol pertama (mentah) = {list(symbols)[:30]}")
             except Exception as e:
                 print(f"DEBUG: gagal ambil daftar symbols: {e}")
             _printed_symbols_debug = True
