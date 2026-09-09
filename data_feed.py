@@ -1,58 +1,34 @@
 """
-Modul buat konek ke MetaAPI dan ambil data candle XAUUSD.
-Butuh: pip install metaapi-cloud-sdk pandas
+Ambil data candle XAUUSD lewat TickerAll (broker session ke HFM).
+Butuh: pip install tickerall pandas
 """
 import pandas as pd
-from metaapi_cloud_sdk import MetaApi
 
-from config import METAAPI_TOKEN, METAAPI_ACCOUNT_ID, SYMBOL, TIMEFRAME
+from config import SYMBOL, TIMEFRAME
+
+_TIMEFRAME_TO_HOURS_FOR_300_BARS = {
+    "M1": 6, "M5": 26, "M15": 76, "H1": 300, "D1": 7200,
+}
 
 
-class DataFeed:
-    def __init__(self):
-        self.api = MetaApi(METAAPI_TOKEN)
-        self.account = None
+def get_candles(client, account_id: str, limit: int = 300) -> pd.DataFrame:
+    hours = _TIMEFRAME_TO_HOURS_FOR_300_BARS.get(TIMEFRAME, 76)
 
-    async def connect(self):
-        """Ambil handle akun MT5 dan pastikan sudah deployed/connected."""
-        self.account = await self.api.metatrader_account_api.get_account(METAAPI_ACCOUNT_ID)
+    bars = client.candles.get(account_id, symbol=SYMBOL, hours=hours, timeframe=TIMEFRAME)
 
-        if self.account.state != "DEPLOYED":
-            await self.account.deploy()
+    if not bars:
+        return pd.DataFrame()
 
-        print("Menunggu koneksi ke broker...")
-        await self.account.wait_connected()
-        print("Akun MT5 terkoneksi ke MetaAPI.")
+    data = [{
+        "time": c.timestamp,
+        "open": c.open,
+        "high": c.high,
+        "low": c.low,
+        "close": c.close,
+        "volume": getattr(c, "volume", 0),
+    } for c in bars]
 
-    async def get_candles(self, limit: int = 300) -> pd.DataFrame:
-        """
-        Ambil N candle terakhir untuk SYMBOL & TIMEFRAME dari config.
-        Return DataFrame dengan kolom: time, open, high, low, close, volume
-        """
-        candles = await self.account.get_historical_candles(
-            symbol=SYMBOL,
-            timeframe=TIMEFRAME,
-            start_time=None,
-            limit=limit,
-        )
-
-        df = pd.DataFrame(candles)
-        if df.empty:
-            return df
-
-        df = df.rename(columns={
-            "time": "time",
-            "open": "open",
-            "high": "high",
-            "low": "low",
-            "close": "close",
-            "tickVolume": "volume",
-        })
-        df["time"] = pd.to_datetime(df["time"])
-        df = df.sort_values("time").reset_index(drop=True)
-        return df[["time", "open", "high", "low", "close", "volume"]]
-
-    async def get_current_price(self) -> dict:
-        """Ambil harga bid/ask terkini untuk SYMBOL."""
-        price = await self.account.get_symbol_price(SYMBOL)
-        return {"bid": price["bid"], "ask": price["ask"], "time": price["time"]}
+    df = pd.DataFrame(data)
+    df["time"] = pd.to_datetime(df["time"])
+    df = df.sort_values("time").reset_index(drop=True)
+    return df.tail(limit)
