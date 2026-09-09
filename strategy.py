@@ -1,5 +1,12 @@
 """
-Strategi: RSI Reversal (M5) - sederhana, sinyal lebih sering.
+Strategi: RSI Reversal - sederhana, sinyal lebih sering.
+RSI dihitung pakai metode Wilder's Smoothing (sama seperti MT5/TradingView),
+supaya angka RSI yang dibaca bot konsisten dengan yang terlihat di chart MT5.
+
+Logic:
+- RSI < RSI_OVERSOLD  -> BUY (harga dianggap sudah terlalu murah sesaat)
+- RSI > RSI_OVERBOUGHT -> SELL (harga dianggap sudah terlalu mahal sesaat)
+- SL = 1x ATR, TP = RISK_REWARD_RATIO x jarak SL (disiplin, RR ketat)
 """
 import pandas as pd
 
@@ -10,16 +17,20 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     delta = df["close"].diff()
-    gain = delta.where(delta > 0, 0).rolling(RSI_PERIOD).mean()
-    loss = -delta.where(delta < 0, 0).rolling(RSI_PERIOD).mean()
-    rs = gain / loss.replace(0, pd.NA)
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
+
+    avg_gain = gain.ewm(alpha=1 / RSI_PERIOD, adjust=False, min_periods=RSI_PERIOD).mean()
+    avg_loss = loss.ewm(alpha=1 / RSI_PERIOD, adjust=False, min_periods=RSI_PERIOD).mean()
+
+    rs = avg_gain / avg_loss.replace(0, pd.NA)
     df["rsi"] = 100 - (100 / (1 + rs))
 
     high_low = df["high"] - df["low"]
     high_close = (df["high"] - df["close"].shift()).abs()
     low_close = (df["low"] - df["close"].shift()).abs()
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    df["atr"] = tr.rolling(ATR_PERIOD).mean()
+    df["atr"] = tr.ewm(alpha=1 / ATR_PERIOD, adjust=False, min_periods=ATR_PERIOD).mean()
 
     return df
 
