@@ -20,6 +20,7 @@ from strategy import check_signal
 from risk_manager import calculate_lot_size, daily_loss_exceeded
 from executor import place_order, has_open_position, get_account_info
 from stats import print_win_rate_summary
+from price_check import is_price_reliable
 
 PAUSE_TRADING = os.environ.get("PAUSE_TRADING", "false").lower() == "true"
 
@@ -96,6 +97,8 @@ def main():
 
                 if PAUSE_TRADING:
                     print("⏸️  PAUSE_TRADING aktif - order TIDAK dikirim (mode observasi saja).")
+                elif not is_price_reliable(client, account_id, result["entry"]):
+                    print("Order dibatalkan karena data harga dicurigai tidak akurat.")
                 else:
                     order = place_order(client, account_id, result["signal"], lot, result["sl"], result["tp"])
                     if order is not None:
