@@ -1,7 +1,12 @@
 """
-Loop utama bot - strategi RSI Reversal (M5), sinyal lebih sering, RR ketat 1:1.5.
+Loop utama bot - strategi RSI Reversal, sinyal lebih sering, RR ketat 1:1.5.
 Otomatis cetak ringkasan win rate tiap kali posisi baru saja closed.
+
+PAUSE_TRADING=true di Railway Variables -> bot tetap jalan mantau & print data,
+TAPI TIDAK kirim order sama sekali. Berguna buat verifikasi data akurat dulu
+sebelum entry beneran (misal saat curiga ada data yang salah/basi).
 """
+import os
 import time
 import datetime
 from tickerall import Tickerall
@@ -15,6 +20,8 @@ from strategy import check_signal
 from risk_manager import calculate_lot_size, daily_loss_exceeded
 from executor import place_order, has_open_position, get_account_info
 from stats import print_win_rate_summary
+
+PAUSE_TRADING = os.environ.get("PAUSE_TRADING", "false").lower() == "true"
 
 
 def main():
@@ -34,6 +41,8 @@ def main():
     was_position_open = has_open_position(client, account_id)
 
     print(f"Bot mulai jalan (strategi: RSI Reversal {TIMEFRAME}). Memantau XAUUSD...")
+    if PAUSE_TRADING:
+        print("⏸️  PAUSE_TRADING AKTIF - bot HANYA memantau & print data, TIDAK akan kirim order.")
     if was_position_open:
         print("Catatan: sudah ada posisi terbuka saat bot start.")
 
@@ -74,18 +83,27 @@ def main():
 
             result = check_signal(df)
 
+            last_candle_time = df["time"].iloc[-1]
+            last_close = df["close"].iloc[-1]
+            last_5 = df[["time", "close"]].tail(5).to_dict("records")
+
             if result["signal"] in ("BUY", "SELL"):
                 lot = calculate_lot_size(equity_now, result["entry"], result["sl"])
                 print(f"Sinyal {result['signal']} | entry={result['entry']:.2f} sl={result['sl']:.2f} "
                       f"tp={result['tp']:.2f} lot={lot} | {result['reason']}")
-                order = place_order(client, account_id, result["signal"], lot, result["sl"], result["tp"])
-                if order is not None:
-                    was_position_open = True
+                print(f"[DEBUG] total candle={len(df)}, candle terakhir={last_candle_time}, "
+                      f"close terakhir={last_close:.2f}, 5 candle terakhir={last_5}")
+
+                if PAUSE_TRADING:
+                    print("⏸️  PAUSE_TRADING aktif - order TIDAK dikirim (mode observasi saja).")
+                else:
+                    order = place_order(client, account_id, result["signal"], lot, result["sl"], result["tp"])
+                    if order is not None:
+                        was_position_open = True
             else:
-                last_candle_time = df["time"].iloc[-1]
-                last_close = df["close"].iloc[-1]
                 print(f"[{datetime.datetime.now()}] Belum ada sinyal ({result.get('reason', '')}). "
-                      f"[DEBUG: candle terakhir = {last_candle_time}, close = {last_close:.2f}]")
+                      f"[DEBUG: total candle={len(df)}, terakhir={last_candle_time}, close={last_close:.2f}, "
+                      f"5 terakhir={last_5}]")
 
         except Exception as e:
             print(f"Error di loop utama: {e}")
