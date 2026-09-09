@@ -8,7 +8,7 @@ from tickerall import Tickerall
 
 from config import (
     TICKERALL_API_KEY, BROKER, MT_SERVER, MT_ACCOUNT, MT_PASSWORD,
-    CHECK_INTERVAL_SECONDS,
+    CHECK_INTERVAL_SECONDS, TIMEFRAME,
 )
 from data_feed import get_candles
 from strategy import check_signal
@@ -33,7 +33,7 @@ def main():
 
     was_position_open = has_open_position(client, account_id)
 
-    print("Bot mulai jalan (strategi: RSI Reversal M5). Memantau XAUUSD...")
+    print(f"Bot mulai jalan (strategi: RSI Reversal {TIMEFRAME}). Memantau XAUUSD...")
     if was_position_open:
         print("Catatan: sudah ada posisi terbuka saat bot start.")
 
@@ -82,7 +82,10 @@ def main():
                 if order is not None:
                     was_position_open = True
             else:
-                print(f"[{datetime.datetime.now()}] Belum ada sinyal ({result.get('reason', '')}).")
+                last_candle_time = df["time"].iloc[-1]
+                last_close = df["close"].iloc[-1]
+                print(f"[{datetime.datetime.now()}] Belum ada sinyal ({result.get('reason', '')}). "
+                      f"[DEBUG: candle terakhir = {last_candle_time}, close = {last_close:.2f}]")
 
         except Exception as e:
             print(f"Error di loop utama: {e}")
