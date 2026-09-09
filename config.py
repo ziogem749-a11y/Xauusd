@@ -26,3 +26,4 @@ ATR_PERIOD = int(os.environ.get("ATR_PERIOD", 14))
 RISK_PERCENT_PER_TRADE = float(os.environ.get("RISK_PERCENT", 1.0))
 MAX_DAILY_LOSS_PERCENT = float(os.environ.get("MAX_DAILY_LOSS_PERCENT", 3.0))
 CHECK_INTERVAL_SECONDS = int(os.environ.get("CHECK_INTERVAL_SECONDS", 60))
+TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
