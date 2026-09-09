@@ -1,85 +1,126 @@
 """
-Logic strategi: EMA Trend Filter + Asia Session Breakout + ATR untuk SL/TP.
-Butuh: pip install pandas numpy
+Strategi: Trend Pullback Entry.
+
+1. Tren besar ditentukan dari H1 (EMA50 vs EMA200).
+2. Entry dicari di M15, nunggu harga PULLBACK ke EMA21.
+3. Konfirmasi pola candle (bullish/bearish engulfing) di area pullback.
+4. Filter RSI - hindari entry saat RSI masih ekstrem searah posisi.
+5. SL dari struktur (swing low/high N candle terakhir).
+6. TP dari rasio Risk:Reward.
 """
 import pandas as pd
 import numpy as np
 
 from config import (
-    EMA_FAST, EMA_SLOW, ATR_PERIOD,
-    ATR_SL_MULTIPLIER, ATR_TP_MULTIPLIER,
-    ASIA_SESSION_START_HOUR_WIB, ASIA_SESSION_END_HOUR_WIB,
+    EMA_TREND_FAST, EMA_TREND_SLOW, EMA_PULLBACK,
+    RSI_PERIOD, RSI_OVERBOUGHT, RSI_OVERSOLD,
+    SWING_LOOKBACK, RISK_REWARD_RATIO,
+    PULLBACK_TOLERANCE_ATR, ATR_PERIOD,
 )
 
 
-def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """Tambah kolom EMA fast/slow dan ATR ke DataFrame candle."""
-    df = df.copy()
-    df["ema_fast"] = df["close"].ewm(span=EMA_FAST, adjust=False).mean()
-    df["ema_slow"] = df["close"].ewm(span=EMA_SLOW, adjust=False).mean()
+def add_indicators_htf(df_h1: pd.DataFrame) -> pd.DataFrame:
+    df = df_h1.copy()
+    df["ema_trend_fast"] = df["close"].ewm(span=EMA_TREND_FAST, adjust=False).mean()
+    df["ema_trend_slow"] = df["close"].ewm(span=EMA_TREND_SLOW, adjust=False).mean()
+    return df
+
+
+def add_indicators_ltf(df_m15: pd.DataFrame) -> pd.DataFrame:
+    df = df_m15.copy()
+    df["ema_pullback"] = df["close"].ewm(span=EMA_PULLBACK, adjust=False).mean()
+
+    delta = df["close"].diff()
+    gain = delta.where(delta > 0, 0).rolling(RSI_PERIOD).mean()
+    loss = -delta.where(delta < 0, 0).rolling(RSI_PERIOD).mean()
+    rs = gain / loss.replace(0, np.nan)
+    df["rsi"] = 100 - (100 / (1 + rs))
 
     high_low = df["high"] - df["low"]
     high_close = (df["high"] - df["close"].shift()).abs()
     low_close = (df["low"] - df["close"].shift()).abs()
-    true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    df["atr"] = true_range.rolling(ATR_PERIOD).mean()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    df["atr"] = tr.rolling(ATR_PERIOD).mean()
 
     return df
 
 
-def get_asia_session_range(df: pd.DataFrame) -> tuple:
-    """
-    Ambil high/low dari candle-candle yang jatuh di jam sesi Asia (WIB) hari ini.
-    Asumsi df["time"] sudah dalam UTC — konversi ke WIB (UTC+7) dulu.
-    """
-    df = df.copy()
-    df["time_wib"] = df["time"] + pd.Timedelta(hours=7)
-    today_wib = df["time_wib"].iloc[-1].date()
-
-    mask = (
-        (df["time_wib"].dt.date == today_wib) &
-        (df["time_wib"].dt.hour >= ASIA_SESSION_START_HOUR_WIB) &
-        (df["time_wib"].dt.hour < ASIA_SESSION_END_HOUR_WIB)
-    )
-    asia_candles = df[mask]
-
-    if asia_candles.empty:
-        return None, None
-
-    return asia_candles["high"].max(), asia_candles["low"].min()
+def get_trend(df_h1_with_indicators: pd.DataFrame) -> str:
+    last = df_h1_with_indicators.iloc[-1]
+    if pd.isna(last["ema_trend_fast"]) or pd.isna(last["ema_trend_slow"]):
+        return "FLAT"
+    if last["ema_trend_fast"] > last["ema_trend_slow"]:
+        return "UP"
+    elif last["ema_trend_fast"] < last["ema_trend_slow"]:
+        return "DOWN"
+    return "FLAT"
 
 
-def check_signal(df: pd.DataFrame) -> dict:
-    """
-    Cek apakah candle terakhir memenuhi syarat entry.
-    Return dict: {"signal": "BUY"/"SELL"/None, "entry": float, "sl": float, "tp": float, "atr": float}
-    """
-    df = add_indicators(df)
-    if len(df) < max(EMA_SLOW, ATR_PERIOD) + 1:
-        return {"signal": None}
+def _is_bullish_engulfing(prev, curr) -> bool:
+    return (prev["close"] < prev["open"]) and (curr["close"] > curr["open"]) and \
+           (curr["close"] >= prev["open"]) and (curr["open"] <= prev["close"])
 
-    last = df.iloc[-1]
-    asia_high, asia_low = get_asia_session_range(df)
 
-    if asia_high is None or pd.isna(last["atr"]):
-        return {"signal": None}
+def _is_bearish_engulfing(prev, curr) -> bool:
+    return (prev["close"] > prev["open"]) and (curr["close"] < curr["open"]) and \
+           (curr["close"] <= prev["open"]) and (curr["open"] >= prev["close"])
 
-    uptrend = last["ema_fast"] > last["ema_slow"]
-    downtrend = last["ema_fast"] < last["ema_slow"]
 
-    breakout_up = last["close"] > asia_high
-    breakout_down = last["close"] < asia_low
+def check_signal(df_h1: pd.DataFrame, df_m15: pd.DataFrame) -> dict:
+    df_h1i = add_indicators_htf(df_h1)
+    df_m15i = add_indicators_ltf(df_m15)
 
-    if uptrend and breakout_up:
-        entry = last["close"]
-        sl = entry - (last["atr"] * ATR_SL_MULTIPLIER)
-        tp = entry + (last["atr"] * ATR_TP_MULTIPLIER)
-        return {"signal": "BUY", "entry": entry, "sl": sl, "tp": tp, "atr": last["atr"]}
+    min_bars_h1 = max(EMA_TREND_FAST, EMA_TREND_SLOW) + 1
+    min_bars_m15 = max(EMA_PULLBACK, RSI_PERIOD, ATR_PERIOD, SWING_LOOKBACK) + 2
+    if len(df_h1i) < min_bars_h1 or len(df_m15i) < min_bars_m15:
+        return {"signal": None, "reason": "data belum cukup"}
 
-    if downtrend and breakout_down:
-        entry = last["close"]
-        sl = entry + (last["atr"] * ATR_SL_MULTIPLIER)
-        tp = entry - (last["atr"] * ATR_TP_MULTIPLIER)
-        return {"signal": "SELL", "entry": entry, "sl": sl, "tp": tp, "atr": last["atr"]}
+    trend = get_trend(df_h1i)
+    if trend == "FLAT":
+        return {"signal": None, "reason": "tren H1 gak jelas"}
 
-    return {"signal": None}
+    curr = df_m15i.iloc[-1]
+    prev = df_m15i.iloc[-2]
+
+    if pd.isna(curr["atr"]) or pd.isna(curr["ema_pullback"]) or pd.isna(curr["rsi"]):
+        return {"signal": None, "reason": "indikator M15 belum lengkap"}
+
+    distance_to_ema = abs(curr["close"] - curr["ema_pullback"])
+    near_pullback_zone = distance_to_ema <= (curr["atr"] * PULLBACK_TOLERANCE_ATR)
+
+    if not near_pullback_zone:
+        return {"signal": None, "reason": "harga belum di area pullback"}
+
+    swing_window = df_m15i.iloc[-(SWING_LOOKBACK + 1):-1]
+
+    if trend == "UP":
+        confirmed = _is_bullish_engulfing(prev, curr)
+        rsi_ok = curr["rsi"] < RSI_OVERBOUGHT
+        if confirmed and rsi_ok:
+            entry = curr["close"]
+            sl = swing_window["low"].min()
+            risk = entry - sl
+            if risk <= 0:
+                return {"signal": None, "reason": "swing low tidak valid (SL >= entry)"}
+            tp = entry + risk * RISK_REWARD_RATIO
+            return {
+                "signal": "BUY", "entry": entry, "sl": sl, "tp": tp,
+                "reason": f"tren UP + pullback + bullish engulfing (RSI={curr['rsi']:.1f})",
+            }
+
+    elif trend == "DOWN":
+        confirmed = _is_bearish_engulfing(prev, curr)
+        rsi_ok = curr["rsi"] > RSI_OVERSOLD
+        if confirmed and rsi_ok:
+            entry = curr["close"]
+            sl = swing_window["high"].max()
+            risk = sl - entry
+            if risk <= 0:
+                return {"signal": None, "reason": "swing high tidak valid (SL <= entry)"}
+            tp = entry - risk * RISK_REWARD_RATIO
+            return {
+                "signal": "SELL", "entry": entry, "sl": sl, "tp": tp,
+                "reason": f"tren DOWN + pullback + bearish engulfing (RSI={curr['rsi']:.1f})",
+            }
+
+    return {"signal": None, "reason": "belum ada konfirmasi candle di area pullback"}
