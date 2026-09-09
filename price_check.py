@@ -1,7 +1,10 @@
 """
-Ambil harga live sesaat (bid/ask) lewat streaming tick TickerAll, buat cross-check
-harga dari candles.get() sebelum order dikirim. Kalau selisihnya kegedean,
-order dibatalkan otomatis - lebih baik gak entry daripada entry pakai data salah.
+Ambil harga live sesaat (bid/ask) lewat streaming tick TickerAll.
+Dipakai untuk 2 hal:
+1. Melengkapi candle terakhir yang masih "berjalan" (belum closed) supaya RSI
+   yang dihitung bot sedekat mungkin dengan yang ditampilkan live di MT5.
+2. Cross-check harga sebelum kirim order (kalau selisih dari candle kegedean,
+   order dibatalkan demi keamanan).
 """
 import time
 from config import SYMBOL
@@ -38,9 +41,7 @@ def get_live_price(client, account_id: str, timeout_seconds: int = 5):
     return price_holder["price"]
 
 
-def is_price_reliable(client, account_id: str, candle_price: float) -> bool:
-    live_price = get_live_price(client, account_id)
-
+def is_price_reliable(candle_price: float, live_price) -> bool:
     if live_price is None:
         print("Tidak bisa ambil harga live buat verifikasi - order DIBATALKAN demi keamanan.")
         return False
@@ -49,7 +50,7 @@ def is_price_reliable(client, account_id: str, candle_price: float) -> bool:
     print(f"Cross-check harga: candle={candle_price:.2f}, live={live_price:.2f}, selisih={diff:.2f}")
 
     if diff > MAX_PRICE_DIFF:
-        print(f"⚠️ SELISIH TERLALU BESAR (>{MAX_PRICE_DIFF})! Data candle dicurigai salah - order DIBATALKAN.")
+        print(f"⚠️ SELISIH TERLALU BESAR (>{MAX_PRICE_DIFF})! Order DIBATALKAN.")
         return False
 
     return True
