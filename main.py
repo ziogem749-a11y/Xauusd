@@ -1,5 +1,5 @@
 """
-Loop utama bot - strategi Trend Pullback Entry (H1 tren + M15 timing entry).
+Loop utama bot - strategi RSI Reversal (M5), sinyal lebih sering, RR ketat 1:1.5.
 """
 import time
 import datetime
@@ -7,10 +7,10 @@ from tickerall import Tickerall
 
 from config import (
     TICKERALL_API_KEY, BROKER, MT_SERVER, MT_ACCOUNT, MT_PASSWORD,
-    CHECK_INTERVAL_SECONDS, TEST_MODE,
+    CHECK_INTERVAL_SECONDS,
 )
-from data_feed import get_htf_candles, get_ltf_candles
-from strategy import check_signal, check_signal_test_mode
+from data_feed import get_candles
+from strategy import check_signal
 from risk_manager import calculate_lot_size, daily_loss_exceeded
 from executor import place_order, has_open_position, get_account_info
 
@@ -29,10 +29,7 @@ def main():
     equity_start_of_day = account_info["equity"]
     current_day = datetime.date.today()
 
-    if TEST_MODE:
-        print("⚠️  TEST_MODE AKTIF - bot akan paksa BUY di kesempatan pertama, cuma buat tes pipeline!")
-
-    print("Bot mulai jalan (strategi: Trend Pullback Entry). Memantau XAUUSD...")
+    print("Bot mulai jalan (strategi: RSI Reversal M5). Memantau XAUUSD...")
 
     while True:
         try:
@@ -55,15 +52,13 @@ def main():
                 time.sleep(CHECK_INTERVAL_SECONDS)
                 continue
 
-            df_h1 = get_htf_candles(client, account_id, limit=300)
-            df_m15 = get_ltf_candles(client, account_id, limit=300)
-
-            if df_h1.empty or df_m15.empty:
-                print("Data candle kosong (H1 atau M15), skip cek kali ini.")
+            df = get_candles(client, account_id, limit=300)
+            if df.empty:
+                print("Data candle kosong, skip cek kali ini.")
                 time.sleep(CHECK_INTERVAL_SECONDS)
                 continue
 
-            result = check_signal_test_mode(df_h1, df_m15) if TEST_MODE else check_signal(df_h1, df_m15)
+            result = check_signal(df)
 
             if result["signal"] in ("BUY", "SELL"):
                 lot = calculate_lot_size(equity_now, result["entry"], result["sl"])
