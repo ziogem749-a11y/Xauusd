@@ -124,3 +124,24 @@ def check_signal(df_h1: pd.DataFrame, df_m15: pd.DataFrame) -> dict:
             }
 
     return {"signal": None, "reason": "belum ada konfirmasi candle di area pullback"}
+
+def check_signal_test_mode(df_h1: pd.DataFrame, df_m15: pd.DataFrame) -> dict:
+    """
+    MODE TESTING - buat verifikasi alur otomatisasi (data -> sinyal -> order) beneran jalan.
+    Selalu BUY dengan SL/TP super ketat (lot minimum), TIDAK pakai logic strategi asli.
+    JANGAN dipakai buat trading beneran - cuma buat tes pipeline sekali aja.
+    """
+    df_m15i = add_indicators_ltf(df_m15)
+    curr = df_m15i.iloc[-1]
+
+    if pd.isna(curr["atr"]) or curr["atr"] <= 0:
+        return {"signal": None, "reason": "ATR belum siap, tunggu candle berikutnya"}
+
+    entry = curr["close"]
+    sl = entry - curr["atr"] * 0.3
+    tp = entry + curr["atr"] * 0.5
+
+    return {
+        "signal": "BUY", "entry": entry, "sl": sl, "tp": tp,
+        "reason": "MODE TESTING - paksa BUY buat verifikasi pipeline eksekusi",
+    }
