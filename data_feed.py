@@ -1,5 +1,5 @@
 """
-Ambil data candle XAUUSD lewat TickerAll - 1 timeframe (M5) untuk strategi RSI.
+Ambil data candle XAUUSD lewat TickerAll - 1 timeframe (M1/M5/dst) untuk strategi RSI.
 """
 import pandas as pd
 
@@ -27,6 +27,6 @@ def get_candles(client, account_id: str, limit: int = 300) -> pd.DataFrame:
     } for c in bars]
 
     df = pd.DataFrame(data)
-    df["time"] = pd.to_datetime(df["time"])
+    df["time"] = pd.to_datetime(df["time"], unit="s")
     df = df.sort_values("time").reset_index(drop=True)
     return df.tail(limit)
