@@ -1,8 +1,8 @@
 """
-Loop utama bot - strategi Random Signal, RR 1:1.5.
+Loop utama bot - strategi RSI Reversal, RR 1:1.5.
 Otomatis cetak ringkasan win rate tiap kali posisi baru saja closed.
 Otomatis WARNING kalau data candle dari TickerAll ternyata beku/stuck.
-Tetap print log walau lagi nunggu posisi terbuka ketutup.
+Order HANYA dicoba sekali (tidak ada retry) demi keamanan.
 """
 import os
 import time
@@ -42,7 +42,7 @@ def main():
     last_seen_candle_time = None
     stuck_count = 0
 
-    print(f"Bot mulai jalan (strategi: Random Signal, {TIMEFRAME}). Memantau XAUUSD...")
+    print(f"Bot mulai jalan (strategi: RSI Reversal, {TIMEFRAME}). Memantau XAUUSD...")
     if PAUSE_TRADING:
         print("⏸️  PAUSE_TRADING AKTIF - bot HANYA memantau & print data, TIDAK akan kirim order.")
     if was_position_open:
