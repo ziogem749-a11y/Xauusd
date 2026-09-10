@@ -1,7 +1,8 @@
 """
 Loop utama bot - strategi RSI Reversal, RR 1:1.5.
+Pakai WebSocket streaming (bukan cuma polling candles.get()) untuk harga live,
+supaya tidak kena masalah "data beku" saat TickerAll reconnect ke broker.
 Otomatis cetak ringkasan win rate tiap kali posisi baru saja closed.
-Otomatis WARNING kalau data candle dari TickerAll ternyata beku/stuck.
 Order HANYA dicoba sekali (tidak ada retry) demi keamanan.
 """
 import os
@@ -13,14 +14,15 @@ from config import (
     TICKERALL_API_KEY, BROKER, MT_SERVER, MT_ACCOUNT, MT_PASSWORD,
     CHECK_INTERVAL_SECONDS, TIMEFRAME,
 )
-from data_feed import get_candles
+from data_feed import get_candles, append_live_candle
 from strategy import check_signal
 from risk_manager import calculate_lot_size, daily_loss_exceeded
 from executor import place_order, has_open_position, get_account_info, get_open_positions_detail
 from stats import print_win_rate_summary
+from price_check import connect_stream, get_latest_price
 
 PAUSE_TRADING = os.environ.get("PAUSE_TRADING", "false").lower() == "true"
-STUCK_DATA_THRESHOLD = 3
+STALE_PRICE_DIFF_THRESHOLD = 2.0
 
 
 def main():
@@ -33,14 +35,14 @@ def main():
     account_id = session.account_id
     print(f"Terhubung. Account ID: {account_id}")
 
+    print("Menyambungkan ke WebSocket stream untuk harga live...")
+    stream = connect_stream(client, account_id)
+
     account_info = get_account_info(client, account_id)
     equity_start_of_day = account_info["equity"]
     current_day = datetime.date.today()
 
     was_position_open = has_open_position(client, account_id)
-
-    last_seen_candle_time = None
-    stuck_count = 0
 
     print(f"Bot mulai jalan (strategi: RSI Reversal, {TIMEFRAME}). Memantau XAUUSD...")
     if PAUSE_TRADING:
@@ -80,29 +82,28 @@ def main():
                 time.sleep(CHECK_INTERVAL_SECONDS)
                 continue
 
-            df = get_candles(client, account_id, limit=300)
-            if df.empty:
+            df_closed = get_candles(client, account_id, limit=300)
+            if df_closed.empty:
                 print("Data candle kosong, skip cek kali ini.")
                 time.sleep(CHECK_INTERVAL_SECONDS)
                 continue
 
-            last_candle_time = df["time"].iloc[-1]
-            last_close = df["close"].iloc[-1]
+            live_price = get_latest_price(stream)
 
-            if last_candle_time == last_seen_candle_time:
-                stuck_count += 1
-            else:
-                stuck_count = 0
-            last_seen_candle_time = last_candle_time
+            last_candle_close = df_closed["close"].iloc[-1]
+            if live_price is not None:
+                diff = abs(last_candle_close - live_price)
+                if diff > STALE_PRICE_DIFF_THRESHOLD:
+                    print(f"⚠️ Candle basi terdeteksi (candle={last_candle_close:.2f}, live={live_price:.2f}, "
+                          f"selisih={diff:.2f}). Skip cek kali ini, tunggu candle sinkron lagi.")
+                    time.sleep(CHECK_INTERVAL_SECONDS)
+                    continue
 
-            if stuck_count >= STUCK_DATA_THRESHOLD:
-                print(f"⚠️⚠️⚠️ DATA BEKU TERDETEKSI! Candle terakhir tidak berubah selama "
-                      f"{stuck_count + 1}x cek berturut-turut (terakhir={last_candle_time}). "
-                      f"Order TIDAK akan dikirim sampai data normal lagi.")
-                time.sleep(CHECK_INTERVAL_SECONDS)
-                continue
+            df = append_live_candle(df_closed, live_price)
 
             result = check_signal(df)
+
+            last_candle_time = df["time"].iloc[-1]
 
             if result["signal"] in ("BUY", "SELL"):
                 lot = calculate_lot_size(equity_now, result["entry"], result["sl"])
@@ -117,7 +118,7 @@ def main():
                         was_position_open = True
             else:
                 print(f"[{datetime.datetime.now()}] Belum ada sinyal ({result.get('reason', '')}). "
-                      f"[candle_terakhir={last_candle_time}, close={last_close:.2f}]")
+                      f"[live_price={live_price}, candle_terakhir={last_candle_time}]")
 
         except Exception as e:
             print(f"Error di loop utama: {e}")
