@@ -88,7 +88,7 @@ def main():
                 time.sleep(CHECK_INTERVAL_SECONDS)
                 continue
 
-            live_price = get_latest_price(stream)
+            live_price = get_latest_price(stream, account_id)
 
             last_candle_close = df_closed["close"].iloc[-1]
             if live_price is not None:
